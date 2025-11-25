@@ -19,6 +19,7 @@ module top_level (
 	wire [7:0] byte_count;
 	wire [7:0] byte_to_send;
 	wire tx_start;
+	wire finished;
 
 
 	system_controller #(.CLK_FREQ(100_000_000)) button_ctrl
@@ -52,10 +53,12 @@ module top_level (
 		.num_of_bytes (latched_num_of_bytes), //input from system controller
 		.speed (latched_speed), 			//input from system controller
 		.end_of_byte(end_of_byte),			//input from Trasmitter for counter
+		.data_tx(latched_num),				//input from system cotnroller - data to trasmit
 		.led(led_byte),					//output to led on nexys7
-		.byte_count(byte_count),			//output to segment controller for display
+		.total_row_count(byte_count),			//output to segment controller for display
 		.byte_to_send (byte_to_send),		//output to tx - what byte we send
-		.tx_start(tx_start)
+		.tx_start(tx_start),
+		.finished ()
 	);
 
 	seg_controller #(.CLK400HZ(250000)) segment_ctrl
