@@ -80,9 +80,9 @@ module FSM #(parameter CLK_FREQ  = 100_000_000 // System Clock Frequency
     always @* begin
         case (num_of_bytes)
             8'h01: total_bytes_in_square = 20'h01; //1 byte in square
-            8'h20: total_bytes_in_square = 20'd1024; //1024 bytes in square
-            8'h80: total_bytes_in_square = 20'd16384; //16,384 bytes in sqaure
-            8'hFF: total_bytes_in_square = 20'd65025; //65025 bytes in sqaure
+            8'h20: total_bytes_in_square = 20'd1024; //1024 = sqrt(128) bytes in square
+            8'h80: total_bytes_in_square = 20'd16384; //16,384 = sqrt(128) bytes in sqaure
+            8'hFF: total_bytes_in_square = 20'd65536; //d65536 = sqrt(256) bytes in sqaure
             default : total_bytes_in_square = 20'h01; //1 byte in square
         endcase
     end
@@ -105,10 +105,10 @@ module FSM #(parameter CLK_FREQ  = 100_000_000 // System Clock Frequency
 
         case (current_state)
             // --- Idle State ---
-            S_IDLE: begin                                           //01
+            S_IDLE: begin                                               //01                                       
                 if (write_en) begin
-                    finished=0;
-                        next_state = S_TX_DATA; // Start sequence on trigger only when byte to send is loaded with data
+                    finished=0; 
+                    next_state = S_TX_DATA; // Start sequence on trigger only when byte to send is loaded with data
                 end
             end
 
