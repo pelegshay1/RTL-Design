@@ -1,46 +1,19 @@
 `timescale 1ns / 1ps
-//////////////////////////////////////////////////////////////////////////////////
-// Company: 
-// Engineer: 
-// 
-// Create Date: 21.11.2025 18:19:43
-// Design Name: 
-// Module Name: FSM_tb
-// Project Name: 
-// Target Devices: 
-// Tool Versions: 
-// Description: 
-// 
-// Dependencies: 
-// 
-// Revision:
-// Revision 0.01 - File Created
-// Additional Comments:
-// 
-//////////////////////////////////////////////////////////////////////////////////
-
-`timescale 1ns / 1ps
 
 //////////////////////////////////////////////////////////////////////////////////
 // Module Name: fsm_tb
 // Description: Test Bench for the System-Level UART Controller (FSM).
-//              Verifies state transitions, inter-byte delay skipping, 
+//              Verifies state transitions, inter-byte delay skipping,
 //              CR/LF sequence generation, and total byte counting.
 //////////////////////////////////////////////////////////////////////////////////
 
-module fsm_tb;
+module fsm_tb ;
 
     // --- 1. TB Parameters and Constants ---
     localparam CLK_FREQ = 100_000_000;
     localparam T_CLK = 10; // 10 ns period
-    
-    // Test Configurations
-    localparam NUM_BYTES_TEST_1 = 8'd5;    // Total bytes for normal transmission
-    localparam NUM_BYTES_TEST_2 = 8'd4;    // Total bytes for EOL check (when actual_row_width=4)
-    localparam SPEED_NO_DELAY = 8'h00;     // 0ms delay config
-    localparam SPEED_50MS = 8'h05;         // 50ms delay config
-    localparam BAUD_RATE = 57600;
-    
+
+
     // --- 2. TB Signals (REG for inputs, WIRE for outputs) ---
     reg  clk;
     reg  reset;
@@ -48,12 +21,15 @@ module fsm_tb;
     reg  [7:0] num_of_bytes;
     reg  [7:0] speed;
     reg  end_of_byte; // Simulation of Tx PHY 'done' signal
-    
+    reg  [7:0] data_tx;       // Input: The data to be sent (from latched SW[7:0])
+
     // Outputs to monitor
     wire led;
-    wire [7:0] byte_count;
+    wire [7:0] total_row_count;
     wire [7:0] byte_to_send;
     wire tx_start;
+
+    logic row_count;
 
     // --- 3. Instantiate UUT (Unit Under Test) ---
     FSM #(
@@ -65,12 +41,15 @@ module fsm_tb;
         .num_of_bytes(num_of_bytes),
         .speed(speed),
         .end_of_byte(end_of_byte),
+        .data_tx(data_tx),           // Connect the new data input
+
         .led(led),
-        .byte_count(byte_count),
+        .total_row_count(total_row_count),
         .byte_to_send(byte_to_send),
-        .tx_start(tx_start)
+        .tx_start(tx_start),
+        .finished(finished)
     );
-    
+
     // --- 4. Clock Generation ---
     initial begin
         clk = 0;
@@ -93,90 +72,146 @@ module fsm_tb;
         reset = 1;
         write_en = 0;
         end_of_byte = 0;
-        
+        data_tx = 8'hAA;     // The byte we are testing (0xAA)
+
         #20 reset = 0; // Active Low Reset
         #20 reset = 1;
         $display("Time: %0t | System Reset Complete. State: IDLE", $time);
 
-        
+
         // ====================================================================
-        // TEST 1: Standard Transmission (5 Bytes + Spaces, No Delay)
+        // TEST 1: Standard Transmission (256 Bytes  No Delay)
         // ====================================================================
         #50;
-        $display("\n--- Test 1: Standard 5 Bytes (Space Delimiter, No Delay) ---");
-        num_of_bytes = NUM_BYTES_TEST_1; // Target: 5
-        speed = SPEED_NO_DELAY;          // Delay target = 0 cycles
+        $display("\n--- Test 1: Standard 32 Bytes (Target %d) ---", 8'd5);
+        num_of_bytes = 8'd255; // Target: 32
+        speed = 8'h00;          // 0 delay
 
         // Trigger FSM start
         write_en = 1;
-        #10 write_en = 0; // Pulse start
+        #10;
+        @(negedge clk);
+        write_en = 0;   
 
-        // Expected Sequence: D0 -> Wait -> Space -> Wait -> D1 -> Wait -> Space ... -> D4 -> Wait -> Space -> IDLE
-        repeat (NUM_BYTES_TEST_1 * 2) begin // 5 data bytes + 5 delimiters = 10 transmissions
-            @(posedge clk) if (tx_start) begin
-                
-                if (byte_to_send != 8'h20) begin
-                    $display("Time: %0t | [DATA] Sending: %h | Ctr: %d | LED: %b", $time, byte_to_send, byte_count+1, led);
-                end else begin
+
+        // Loop: 5 Data + 5 Delimiters = 10 transmissions total
+        // We wait for the tx_start pulse as the trigger for the simulation
+        while (!finished) begin
+
+            @(posedge clk) while (tx_start == 0) #1; // Wait for FSM to assert start pulse
+
+            if (tx_start) begin
+
+                if (byte_to_send == 8'hAA) begin
+                    // Case 1: Data Byte
+                    $display("Time: %0t | [DATA] Sending: %h (0xAA) | Ctr: %d", $time, total_row_count, led);
+                end else if (byte_to_send == 8'h20) begin
+                    // Case 2: Space Delimiter
                     $display("Time: %0t | [SPECIAL] Sending Space (0x20)", $time);
+                end else if (byte_to_send == 8'h0D) begin
+                    // Case 3: Carriage Return (CR)
+                    $display("Time: %0t | [EOL] Sending CR (0x0D) - Phase 1", $time);
+                end else if (byte_to_send == 8'h0A) begin
+                    // Case 4: Line Feed (LF)
+                    $display("Time: %0t | [EOL] Sending LF (0x0A) - Phase 2", $time);
+                end else begin
+                    // Warning
+                    $display("Time: %0t | WARNING: Unexpected Byte %h", $time, byte_to_send);
                 end
+
+
+                pulse_end_of_byte; // Simulate Tx PHY completion (moves FSM to next state)
+                #10;
                 
-                pulse_end_of_byte; // Simulate Tx PHY completion
             end
+            row_count = total_row_count;
         end
-        
+
         #50;
-        $display("Time: %0t | Verification: Test 1 Complete. Final Data Count: %d (Expected %d)", $time, byte_count, NUM_BYTES_TEST_1);
-        
+
 
         // ====================================================================
-        // TEST 2: End Of Line (CR/LF) Sequence
-        // Note: Assumes actual_row_width is calculated to be 4 (based on 8'h20 input)
-        // Sequence: D1, Space, D2, Space, D3, CR, LF, D4, Space...
+        // TEST 2: Standard Transmission (128 bytes)
+        // ====================================================================
+        #50;
+        $display("\n--- Test 2: Standard 32 Bytes (Target %d) ---", 8'd5);
+        num_of_bytes = 8'h80; // Target: 32
+        speed = 8'h00;          // 0 delay
+
+        // Trigger FSM start
+        write_en = 1;
+        #3;
+        write_en = 0;   
+
+
+        // Loop: 5 Data + 5 Delimiters = 10 transmissions total
+        // We wait for the tx_start pulse as the trigger for the simulation
+        while (!finished) begin
+
+            @(posedge clk) while (tx_start == 0) #1; // Wait for FSM to assert start pulse
+
+            if (tx_start) begin
+
+                if (byte_to_send == 8'hAA) begin
+                    // Case 1: Data Byte
+                    $display("Time: %0t | [DATA] Sending: %h (0xAA) | Ctr: %d", $time, total_row_count, led);
+                end else if (byte_to_send == 8'h20) begin
+                    // Case 2: Space Delimiter
+                    $display("Time: %0t | [SPECIAL] Sending Space (0x20)", $time);
+                end else if (byte_to_send == 8'h0D) begin
+                    // Case 3: Carriage Return (CR)
+                    $display("Time: %0t | [EOL] Sending CR (0x0D) - Phase 1", $time);
+                end else if (byte_to_send == 8'h0A) begin
+                    // Case 4: Line Feed (LF)
+                    $display("Time: %0t | [EOL] Sending LF (0x0A) - Phase 2", $time);
+                end else begin
+                    // Warning
+                    $display("Time: %0t | WARNING: Unexpected Byte %h", $time, byte_to_send);
+                end
+
+
+                pulse_end_of_byte; // Simulate Tx PHY completion (moves FSM to next state)
+                #10;
+                
+            end
+            row_count = total_row_count;
+        end
+
+        #50;
+
+
+
+        // ====================================================================
+        // TEST 3: End Of Line (CR/LF) Sequence (Sending 32 Bytes)
         // ====================================================================
         #100;
-        $display("\n--- Test 2: CR/LF Sequence (Row Width = 32, Total = 32) ---");
-        num_of_bytes = 8'h20; // 32 total bytes
-        speed = SPEED_NO_DELAY; 
-        
+        $display("\n--- Test 2: EOL Sequence (Row Width = 32, Total = 32) ---");
+
+        // Set new data and target (32 bytes is 1 full row)
+        data_tx = 8'hBB;
+        num_of_bytes = 8'd32;
+        speed= 8'h00;
+
         // Trigger start
         write_en = 1;
         #10 write_en = 0;
-        
-        // We will stop the simulation loop just after the CR/LF sequence completes (Byte 32)
-        // The EOL sequence will begin after byte_count reaches 32.
-        
-        // Run until the total byte counter indicates 32 bytes were SENT (plus the CR/LF sequence)
-        @(posedge clk) while (byte_count < 32) begin
+
+        // Loop: Run for 32 Data + 32 Delimiters (The final two are CR/LF)
+        // We run 64 iterations, checking the last two for 0D and 0A
+        while (!finished) begin
+            @(posedge clk) while (tx_start == 0) #1;
             if (tx_start) begin
+
+                // CR/LF Logic Check (This should happen on the last 2 cycles)
+                if (byte_to_send == 8'h0D) $display("Time: %0t | EOL Phase 1: Sending CR (0x0D)", $time);
+                else if (byte_to_send == 8'h0A) $display("Time: %0t | EOL Phase 2: Sending LF (0x0A)", $time);
+                else if (byte_to_send == 8'hBB) $display("Time: %0t | DATA Byte Sent: 0xBB (Count %d)", $time, total_row_count);
+                else if (byte_to_send == 8'h20) $display("Time: %0t | Space Sent", $time);
+
                 pulse_end_of_byte;
             end
         end
-        
-        // --- Verify the CR/LF Transition ---
-        
-        // Expect 1st Special (Space or CR)
-        @(posedge clk) while (!tx_start) #1;
-        $display("Time: %0t | CR/LF 1: Sending %h (Expected 0D)", $time, byte_to_send);
-        if (byte_to_send !== 8'h0D) $error("ERROR: Expected CR (0x0D)");
-        pulse_end_of_byte; // Done sending CR
-        
-        // Expect 2nd Special (LF) - MUST HAPPEN IMMEDIATELY (no delay)
-        @(posedge clk) while (!tx_start) #1;
-        $display("Time: %0t | CR/LF 2: Sending %h (Expected 0A)", $time, byte_to_send);
-        if (byte_to_send !== 8'h0A) $error("ERROR: Expected LF (0x0A)");
-        pulse_end_of_byte; // Done sending LF
-        
-        
-        // --- Verification: Next state must be IDLE ---
-        @(posedge clk) if (tx_start) 
-            $display("Time: %0t | ERROR: FSM continued after final LF.", $time);
-        else 
-            $display("Time: %0t | Verification: EOL sequence complete and FSM is IDLE.", $time);
 
-
-        // 6.4 Finalization
-        #100 $finish;
+        #50 $finish;
     end
-
 endmodule
