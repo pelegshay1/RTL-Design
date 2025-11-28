@@ -86,6 +86,7 @@ module seg_controller #(parameter CLK400HZ = 250000)
 
     always @* begin
         don = 1'b0;
+        curr_digit_comb = 4'b0000;
         case (digit_index_reg)
         4'd0: curr_digit_comb = num[3:0];
         4'd1: curr_digit_comb = num[7:4];

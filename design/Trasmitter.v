@@ -121,8 +121,8 @@ module Transmitter #(
             end
             if (current_state == S_START) begin
                 shift_tx <= {
+                    1'b1,                       // Stop Bit (shift_tx[10])
                     1'b1,                       // Stop Bit (shift_tx[9])
-                    1'b1,
                     byte_to_send[7],            // D7 (shift_tx[8])
                     byte_to_send[6],            // D6 (shift_tx[7])
                     byte_to_send[5],            // D5 (shift_tx[6])
